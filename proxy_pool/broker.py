@@ -4,12 +4,12 @@ refer: https://github.com/abhinavsingh/proxy.py
 """
 import os
 import sys
+import re
 import time
 import argparse
 import threading
 import socket
 import select
-import codecs
 import random
 from util import LogObject
 if os.name != 'nt':
@@ -26,8 +26,8 @@ else:
 class Connection(LogObject):
     """TCP server/client connection abstraction."""
 
-    def __init__(self, what, log_path=''):
-        LogObject.__init__(self, log_path)
+    def __init__(self, what, log_file=''):
+        LogObject.__init__(self, log_file)
         self.conn = None
         self.buffer = b''
         self.closed = False
@@ -75,23 +75,23 @@ class Connection(LogObject):
 
 
 class Server(Connection):
-    def __init__(self, conn, addr, log_path=''):
-        super(Server, self).__init__('server', log_path)
+    def __init__(self, conn, addr, log_file=''):
+        super(Server, self).__init__('server', log_file)
         self.conn = conn
         self.addr = addr
 
 
 class Client(Connection):
-    def __init__(self, conn, addr, log_path=''):
-        super(Client, self).__init__('client', log_path)
+    def __init__(self, conn, addr, log_file=''):
+        super(Client, self).__init__('client', log_file)
         self.conn = conn
         self.addr = addr
 
 
 class LogThread(threading.Thread, LogObject):
-    def __init__(self, log_path=''):
+    def __init__(self, log_file=''):
         threading.Thread.__init__(self)
-        LogObject.__init__(self, log_path=log_path)
+        LogObject.__init__(self, log_file=log_file)
         self.daemon = True
 
 
@@ -99,16 +99,17 @@ class Tunnel(LogThread):
     """ act as a tunnel between client and server.
     """
 
-    def __init__(self, client, server, client_recvbuf_size=8192, 
-            server_recvbuf_size=8192, log_path=''):
-        LogThread.__init__(self, log_path=log_path)
+    def __init__(self, client, client_recvbuf_size=8192, 
+            server_recvbuf_size=8192, proxy_file='proxies', log_file=''):
+        LogThread.__init__(self, log_file=log_file)
 
         self.start_time = time.time()
         self.last_activity = self.start_time
         self.client = client
         self.client_recvbuf_size = client_recvbuf_size
-        self.server = server
         self.server_recvbuf_size = server_recvbuf_size
+        self.proxy_file = proxy_file
+        self.server = None
 
 
     def _is_inactive(self):
@@ -123,7 +124,8 @@ class Tunnel(LogThread):
         finally:
             self.log.info('close client connection')
             self.client.close()
-            self.server.close()
+            if self.server:
+                self.server.close()
     
     
     def _process(self):
@@ -167,6 +169,19 @@ class Tunnel(LogThread):
             if not data:
                 self.log.info('client closed connection')
                 return True
+            if not self.server:
+                m = re.match(r'(GET|CONNECT|POST|HEAD)\s+(\S+)\s+HTTP', 
+                        data.decode('utf8'), re.I)
+                if not m:
+                    self.log.error('can not match first line')
+                    return True
+
+                self.log.info('select server for [{}]'.format(m.group(1)))
+                self.server = self.select_server(m.group(1).upper())
+                if not self.server:
+                    self.log.warning('can not select server')
+                    return True
+                self.log.info('get server [{}]'.format(self.server.addr))
             self.server.queue(data)
 
         if self.server.conn in r:
@@ -178,12 +193,42 @@ class Tunnel(LogThread):
                 return True
             self.client.queue(data)
         return False
-    
+ 
+ 
+    def select_server(self, method):
+        if not os.path.isfile(self.proxy_file):
+            return None
+        pool = []
+        for ln in open(self.proxy_file, 'r').readlines():
+            t = ln.split()
+            if len(t) != 3:
+                continue
+            schemes = [x.upper().strip() for x in t[0].split(',')]
+            ip, port = t[1], int(t[2])
+            if method == 'CONNECT':
+                if 'HTTPS' not in schemes:
+                    continue
+            else: 
+                if 'HTTP' not in schemes:
+                    continue
+            pool.append((t[1], int(t[2])))
+        if not pool:
+            return None
+        start = random.randint(0, len(pool)-1)
+        for i in range(len(pool)):
+            addr = pool[(start + i) % len(pool)]
+            try:
+                conn = socket.create_connection(addr)
+                return Server(conn, addr, log_file=self.log_file)
+            except Exception as e:
+                self.log.exception(e)
+                self.log.warning('try connect [{}] failed'.format(addr))
+        return None
+   
 
 class Broker(LogThread):
-    def __init__(self, config):
-        self.init(config)
-        LogThread.__init__(self, log_path=self.log_path)
+    def __init__(self):
+        LogThread.__init__(self)
         
 
     def init(self, cfg):
@@ -193,8 +238,9 @@ class Broker(LogThread):
         self.client_recvbuf_size = cfg.getint('broker', 'client_recvbuf_size')
         self.server_recvbuf_size = cfg.getint('broker', 'server_recvbuf_size')
         self.open_file_limit = cfg.getint('broker', 'open_file_limit')
-        self.proxy_pool_file = cfg.get('broker', 'proxy_pool_file')
-        self.log_path = cfg.get('broker', 'log_path')
+        self.proxy_file = cfg.get('broker', 'proxy_file')
+        self.log_file = cfg.get('broker', 'log_file')
+        self.set_log(log_file=self.log_file)
         self.socket = None
 
 
@@ -208,15 +254,9 @@ class Broker(LogThread):
             self.socket.listen(self.backlog)
             while True:
                 conn, addr = self.socket.accept()
-                client = Client(conn, addr, self.log_path)
+                client = Client(conn, addr, self.log_file)
                 self.log.info('request from client [{}]'.format(client.addr))
-                server = self.select_server()
-                if not server:
-                    self.log.warning('can not select server')
-                    client.close()
-                    continue
-                self.log.info('select server [{}]'.format(server.addr))
-                self.handle(client, server)
+                self.handle(client)
         except Exception as e:
             self.log.exception(e)
         finally:
@@ -231,33 +271,14 @@ class Broker(LogThread):
                 resource.setrlimit(resource.RLIMIT_NOFILE, (limit, hard_limit))
 
 
-    def select_server(self):
-        if not os.path.isfile(self.proxy_pool_file):
-            return None
-        pool = []
-        for ln in codecs.open(self.proxy_pool_file, 'r', 'utf8').readlines():
-            t = ln.split(':')
-            if len(t) == 2:
-                pool.append((t[0], int(t[1])))
-        if not pool:
-            return None
-        start = random.randint(0, len(pool)-1)
-        for i in range(len(pool)):
-            addr = pool[(start + i) % len(pool)]
-            try:
-                conn = socket.create_connection(addr)
-                return Server(conn, addr, log_path=self.log_path)
-            except Exception as e:
-                self.log.exception(e)
-                self.log.warning('try connect [{}] failed'.format(addr))
-        return None
+    
 
-
-    def handle(self, client, server):
+    def handle(self, client):
         self.log.info('handle request from [{}]'.format(client.addr))
-        tunnel = Tunnel(client, server, 
+        tunnel = Tunnel(client,  
                       server_recvbuf_size=self.server_recvbuf_size,
                       client_recvbuf_size=self.client_recvbuf_size, 
-                      log_path=self.log_path)
+                      proxy_file=self.proxy_file,
+                      log_file=self.log_file)
         tunnel.start()
 

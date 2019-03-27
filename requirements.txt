@@ -1,0 +1,6 @@
+requests
+tornado
+aiohttp
+aiodns
+maxminddb
+git+https://github.com/constverum/ProxyBroker.git

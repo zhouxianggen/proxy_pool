@@ -2,6 +2,9 @@
 """ vps代理服务
 """
 import time
+import json
+import copy
+import argparse
 import threading
 import tornado.ioloop
 import tornado.web
@@ -13,21 +16,41 @@ class Context(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
         self.daemon = True
+        self.lock = threading.Lock()
 
 
     def init(self, config):
         self.proxies = {}
-        self.proxy_pool_file = config.get('admin', 'proxy_pool_file')
+        self.proxy_file = config.get('admin', 'proxy_file')
+        self.log_file = config.get('admin', 'log_file')
     
+
+    def add_proxy(self, proxy):
+        proxy['timestamp'] = int(time.time())
+        k = proxy['name']
+        self.lock.acquire()
+        self.proxies[k] = proxy
+        self.lock.release() 
+
 
     def run(self):
         while True:
-            if self.proxy_pool_file:
+            deletes = []
+            for k,v in self.proxies.items():
+                if time.time() - v['timestamp'] > 300:
+                    deletes.append(k)
+            self.lock.acquire()
+            for k in deletes:
+                self.proxies.pop(k, '')
+            self.lock.release() 
+
+            if self.proxy_file:
                 p = copy.copy(self.proxies)
                 wlns = []
                 for k,v in p.items():
-                    wlns.append('{}:{}\n'.format(v[0], v[1]))
-                codecs.open(self.proxy_pool_file, 'wb', 'utf8').writelines(wlns)
+                    wlns.append('{} {} {}\n'.format(','.join(v['schemes']), 
+                            v['ip'], v['port']))
+                open(self.proxy_file, 'w').writelines(wlns)
             time.sleep(1)
 
 
@@ -36,11 +59,11 @@ g_ctx = Context()
 
 class BaseRequestHandler(LogObject, tornado.web.RequestHandler):
     def __init__(self, *args, **kwargs):
-        LogObject.__init__(self)
+        LogObject.__init__(self, log_file=g_ctx.log_file)
         tornado.web.RequestHandler.__init__(self, *args, **kwargs)
 
 
-class GetProxiesReqeustHandler(BaseRequestHandler):
+class GetProxiesRequestHandler(BaseRequestHandler):
     def get(self):
         self.finish(g_ctx.proxies)
 
@@ -48,12 +71,12 @@ class GetProxiesReqeustHandler(BaseRequestHandler):
 class AddProxyRequestHandler(BaseRequestHandler):
     def post(self):
         self.log.info('[POST] [{}]'.format(self.request.body))
-        d = json.loads(self.request.body)
-        g_ctx['proxies'][d['name']] = (d['host'], d['port'], int(time.time()))
+        proxy = json.loads(self.request.body)
+        g_ctx.add_proxy(proxy)
 
 
-class DefaultReqeustHandler(BaseRequestHandler):
-    def get(self):
+class DefaultRequestHandler(BaseRequestHandler):
+    def get(self, option):
         self.write('page inavailable')
 
 
@@ -61,7 +84,7 @@ class AdminService(tornado.web.Application):
     def __init__(self):
         handlers = [
                 (r"/_add_proxy", AddProxyRequestHandler),
-                (r"/_get_proxies", GetProxiesResponseHandler),
+                (r"/_get_proxies", GetProxiesRequestHandler),
                 (r"(.*)", DefaultRequestHandler)
         ]   
         settings = dict(
@@ -72,11 +95,10 @@ class AdminService(tornado.web.Application):
 
 def main():
     runtime = Runtime()
-    runtime.start()
-
     if runtime.is_running():
         print('admin service already running, exit ..')
         return
+    runtime.start()
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--config', default='proxy_pool.conf', 
@@ -84,6 +106,7 @@ def main():
     args = parser.parse_args()
     config = read_config(args.config)
     g_ctx.init(config)
+    g_ctx.start()
 
     broker = Broker()
     broker.init(config)

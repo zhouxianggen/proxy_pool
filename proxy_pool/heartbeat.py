@@ -1,6 +1,7 @@
 # coding: utf8 
 import os
 import socket
+import json
 import requests
 
 
@@ -34,10 +35,11 @@ def run():
     if not ip:
         return
 
-    b = {'name': get_name(), 'ip': get_ip(), 'port': PROXY_PORT }
+    b = {'name': get_name(), 'schemes': ['HTTP', 'HTTPS'], 'ip': get_ip(), 
+            'port': PROXY_PORT }
     print('send heartbeat to admin')
-    requests.post(ADMIN_HOST, 
-            data=json.dumps(data), timeout=2)
+    r = requests.post(ADMIN_HOST, 
+            data=json.dumps(b), timeout=2)
     print(r.status_code)
 
 

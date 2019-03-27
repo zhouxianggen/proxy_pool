@@ -24,7 +24,7 @@ async def add(proxies):
 proxies = asyncio.Queue()
 broker = Broker(proxies)
 tasks = asyncio.gather(
-    broker.find(types=['HTTP', 'HTTPS'], limit=10),
+    broker.find(types=['HTTP', 'HTTPS'], limit=50),
     add(proxies))
 
 

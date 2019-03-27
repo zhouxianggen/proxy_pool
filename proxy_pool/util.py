@@ -2,6 +2,7 @@
 import os
 import sys
 import time
+import socket
 import logging
 import logging.handlers
 import threading
@@ -44,25 +45,9 @@ class LogObject(object):
         self.log.setLevel(log_level)
 
 
-class Runtime(threading.Thread):
-    def __init__(self, interval=1):
-        threading.Thread.__init__(self)
-        self.daemon = True
-        self.interval = interval
-        self.runtime_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), '.runtime')
-
-
-    def run(self):
-        while 1:
-            open(self.runtime_path, 'w').write(str(int(time.time())))
-            time.sleep(self.interval)
-    
-    
-    def is_running(self):
-        if os.path.isfile(self.runtime_path):
-            c = open(self.runtime_path, 'r').read()
-            if c.isdigit():
-                return int(c) + self.interval + 1 > int(time.time())
-        return False
+def is_addr_used(host, port):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    result = sock.connect_ex((host, port))
+    sock.close()
+    return True if result == 0 else False
 

@@ -9,7 +9,7 @@ import threading
 import tornado.ioloop
 import tornado.web
 from broker import Broker
-from util import read_config, Runtime, LogObject
+from util import is_addr_used, read_config, LogObject
 
 
 class Context(threading.Thread):
@@ -94,12 +94,6 @@ class AdminService(tornado.web.Application):
 
 
 def main():
-    runtime = Runtime()
-    if runtime.is_running():
-        print('admin service already running, exit ..')
-        return
-    runtime.start()
-
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--config', default='proxy_pool.conf', 
             help="specify config file")
@@ -110,10 +104,17 @@ def main():
 
     broker = Broker()
     broker.init(config)
+    if is_addr_used(broker.hostname, broker.port):
+        print('broker already run. exit ..')
+        return
     broker.start()
 
+    port = config.getint('admin', 'port')
+    if is_addr_used('localhost', port):
+        print('admin already run. exit ..')
+        return
     service = tornado.httpserver.HTTPServer(AdminService())
-    service.listen(config.getint('admin', 'port'))
+    service.listen(port)
     tornado.ioloop.IOLoop.current().start()
 
 

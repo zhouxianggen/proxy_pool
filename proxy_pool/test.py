@@ -14,4 +14,5 @@ proxies = {'http': 'http://localhost:8898',
 r = requests.get(url, proxies=proxies)
 print(r.status_code)
 print(len(r.content))
+open('/data/share/x.html', 'wb').write(r.content)
 

@@ -176,7 +176,8 @@ class Tunnel(LogThread):
                     self.log.error('can not match first line')
                     return True
 
-                self.log.info('select server for [{}]'.format(m.group(1)))
+                self.log.info('select server for [{}][{}]'.format(
+                        m.group(1), m.group(2)))
                 self.server = self.select_server(m.group(1).upper())
                 if not self.server:
                     self.log.warning('can not select server')
@@ -214,14 +215,15 @@ class Tunnel(LogThread):
             pool.append((t[1], int(t[2])))
         if not pool:
             return None
+        self.log.info('server pool size [{}]'.format(len(pool)))
         start = random.randint(0, len(pool)-1)
         for i in range(len(pool)):
             addr = pool[(start + i) % len(pool)]
             try:
-                conn = socket.create_connection(addr)
+                conn = socket.create_connection(addr, timeout=1)
                 return Server(conn, addr, log_file=self.log_file)
             except Exception as e:
-                self.log.exception(e)
+                #self.log.exception(e)
                 self.log.warning('try connect [{}] failed'.format(addr))
         return None
    

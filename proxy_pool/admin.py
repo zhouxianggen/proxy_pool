@@ -37,7 +37,7 @@ class Context(threading.Thread):
         while True:
             deletes = []
             for k,v in self.proxies.items():
-                if time.time() - v['timestamp'] > 300:
+                if time.time() - v['timestamp'] > 5:
                     deletes.append(k)
             self.lock.acquire()
             for k in deletes:
@@ -65,6 +65,8 @@ class BaseRequestHandler(LogObject, tornado.web.RequestHandler):
 
 class GetProxiesRequestHandler(BaseRequestHandler):
     def get(self):
+        for k,v in g_ctx.proxies.items():
+            v['active'] = int(time.time()) - int(v['timestamp'])
         self.finish(g_ctx.proxies)
 
 

@@ -13,8 +13,8 @@ async def add(proxies):
         proxy = await proxies.get()
         if proxy is None: break
         print('Found proxy: %s' % proxy)
-        b = {'name': proxy.host, 'schemes': proxy.schemes, 'ip': proxy.host, 
-                'port': proxy.port or 80 }
+        b = {'type': 'free', 'name': proxy.host, 'schemes': proxy.schemes, 
+                'ip': proxy.host, 'port': proxy.port or 80 }
         print('send heartbeat to admin')
         r = requests.post(ADMIN_HOST, 
                 data=json.dumps(b), timeout=2)
@@ -24,7 +24,7 @@ async def add(proxies):
 proxies = asyncio.Queue()
 broker = Broker(proxies)
 tasks = asyncio.gather(
-    broker.find(types=['HTTP', 'HTTPS'], limit=50),
+    broker.find(types=['HTTPS'], limit=100),
     add(proxies))
 
 

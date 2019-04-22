@@ -37,7 +37,7 @@ class Context(threading.Thread):
         while True:
             deletes = []
             for k,v in self.proxies.items():
-                if time.time() - v['timestamp'] > 5:
+                if time.time() - v['timestamp'] > 66:
                     deletes.append(k)
             self.lock.acquire()
             for k in deletes:
